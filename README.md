@@ -1,0 +1,2 @@
+# Nfiles
+Sa se scrie o aplicatie client/server care sa dea posibilitatea de a lista informatii (nume, lungime, permisiuni, proprietar etc.) privitoare la fisierele aflate la distanta. Se presupune ca aceste fisiere sint stocate identic pe diferite masini, astfel incit in cazul in care o masina este indisponibila, sa fie cautate la alte adrese IP (aceste adrese vor fi memorate intr-un fisier al serverului). Daca un client solicita informatii despre fisierele unei masini a carei adresa nu exista in fisier, adresa masinii va fi inserata in acesta.
