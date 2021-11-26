@@ -7,7 +7,8 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/stat.h>
+#include <sys/stat.h>   //Used to get file metadata
+#include <time.h>       //Used to format time-based metadata
    
 #define PORT     8080
 #define MAXLINE 1024
@@ -22,10 +23,23 @@ void GetFileMetadata(const char* szPath, char* Out)
         stat(szPath, &res);
 
         int length = 0;
-        length += snprintf(Out+length, MAXLINE, "Filename:\t%s\n", szPath);
-        length += snprintf(Out+length, MAXLINE, "Filesize:\t%d\n", res.st_size);
-        length += snprintf(Out+length, MAXLINE, "Permissions:\t07o\n", res.st_mode); //Octal
-        length += snprintf(Out+length, MAXLINE, "Owner:\t%d\n", res.st_gid);
+        length += snprintf(Out+length, MAXLINE, "Filename:\t\t%s\n", szPath);
+        length += snprintf(Out+length, MAXLINE, "Filesize:\t\t%d\n", res.st_size);
+        length += snprintf(Out+length, MAXLINE, "Permissions:\t\t");
+        length += snprintf(Out+length, MAXLINE, (S_ISDIR(res.st_mode)) ? "d" : "-");
+        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IRUSR) ? "r" : "-");
+        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IWUSR) ? "w" : "-");
+        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IXUSR) ? "x" : "-");
+        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IRGRP) ? "r" : "-");
+        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IWGRP) ? "w" : "-");
+        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IXGRP) ? "x" : "-");
+        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IROTH) ? "r" : "-");
+        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IWOTH) ? "w" : "-");
+        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IXOTH) ? "x\n" : "-\n");
+        length += snprintf(Out+length, MAXLINE, "Owner:\t\t\t%d\n", res.st_gid);
+        length += snprintf(Out+length, MAXLINE, "Last status change:\t%s", ctime(&res.st_ctime));
+        length += snprintf(Out+length, MAXLINE, "Last file access:\t%s", ctime(&res.st_atime));
+        length += snprintf(Out+length, MAXLINE, "Last file modification:\t%s", ctime(&res.st_mtime));
     }
 }
 
