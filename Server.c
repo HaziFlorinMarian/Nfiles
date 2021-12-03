@@ -9,14 +9,15 @@
 #include <netinet/in.h>
 #include <sys/stat.h>   //Used to get file metadata
 #include <time.h>       //Used to format time-based metadata
+#include <dirent.h>     //User to list directory's content
    
 #define PORT     8080
-#define MAXLINE 1024
+#define MAXLINE 65527 // 65535 is MAX and other 8 bytes are reserved for header
 
 void GetFileMetadata(const char* szPath, char* Out)
 {
     if (access(szPath, F_OK) != 0 )
-        snprintf(Out, MAXLINE, "File \"%s\" does not exists.\n", szPath);
+        snprintf(Out, MAXLINE, "%s", szPath);
     else
     {
         struct stat res;
@@ -40,6 +41,21 @@ void GetFileMetadata(const char* szPath, char* Out)
         length += snprintf(Out+length, MAXLINE, "Last status change:\t%s", ctime(&res.st_ctime));
         length += snprintf(Out+length, MAXLINE, "Last file access:\t%s", ctime(&res.st_atime));
         length += snprintf(Out+length, MAXLINE, "Last file modification:\t%s", ctime(&res.st_mtime));
+
+        DIR *d;
+        struct dirent *dir;
+        d = opendir(szPath);
+        if (d != NULL)
+        {
+            length += snprintf(Out+length, MAXLINE, "Content of %s:\t", szPath);
+            while ((dir = readdir(d)) != NULL)
+            {
+                length += snprintf(Out+length, MAXLINE, "%s\t", dir->d_name);
+            }
+
+            closedir(d);
+        }
+        length += snprintf(Out+length, MAXLINE, "\n");
     }
 }
 
@@ -80,8 +96,9 @@ int main()
     {
         n = recvfrom(sockfd, (char *)InMsg, MAXLINE, MSG_WAITALL, (struct sockaddr *) &cliaddr, &len);
         InMsg[n] = '\0';
-        printf("Client request: %s\n", InMsg);
+        // printf("[DEBUG] Client request: %s\n", InMsg);
         GetFileMetadata(InMsg, OutMsg);
+        // printf("[DEBUG] Server answer: %s (len = %d)\n", OutMsg, strlen(OutMsg));
         sendto(sockfd, (const char *)OutMsg, strlen(OutMsg),  MSG_CONFIRM, (const struct sockaddr *) &cliaddr, len);
 
         memset(&InMsg, 0, MAXLINE);      //We're preparing buffer for next request

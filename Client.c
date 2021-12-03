@@ -10,7 +10,7 @@
 #include <stdbool.h> //So retarded, need this for bool functions because we compile with C99 standard
    
 #define PORT     8080
-#define MAXLINE 1024
+#define MAXLINE 65527 // 65535 is MAX and other 8 bytes are reserved for header
 
 bool isValidIpAddress(char *ipAddress)
 {
@@ -57,9 +57,55 @@ bool ReadIPsList(char** iplist, int maxLines, int maxLen, int* ipCount)
         return false;
     }
 
+    fclose(fp);
     free(line);
     printf("\n");
     return true;
+}
+
+void AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
+{
+    printf("Do you want to add a new server? (Y/N)\n");
+    
+    char ans = getchar();
+
+    if (ans == 'y' || ans == 'Y')
+    {
+        if (*ipCount >= maxLines)
+        {
+            printf("ERROR! Maximum number of IP addresses has been reached!\n");
+            return;
+        }
+
+        FILE *fp = fopen("Servers.txt", "a");
+
+        if (fp == NULL)
+        {
+            printf("Can't open file Servers.txt!\n");
+            return;
+        }
+
+
+        bool is_ok = false;
+        char IP[16 + 1];
+        do {
+            printf("\nEnter IP address: ");
+            scanf("%s", IP);
+            if (isValidIpAddress(IP))
+            {
+                is_ok = true;
+                fprintf(fp, "%s\n", IP);
+
+                iplist[*ipCount] = (char *)malloc(16);
+                strncpy(iplist[*ipCount], IP, maxLen);
+                printf("\"%s\" added to IP list\n", iplist[*ipCount]);
+            }
+            else
+                printf("ERROR! %s is not a valid IP address!", IP);
+        } while (is_ok != true);
+
+        fclose(fp);
+    }
 }
 
 int main()
@@ -101,18 +147,41 @@ int main()
         printf("Enter filename:\t");
         fgets(SentMsg, MAXLINE, stdin);
         SentMsg[strlen(SentMsg)-1]='\0';    //Remove newline
-        //printf("\n");
+        
+        if (strlen(SentMsg) == 0)
+            continue;
         
         sendto(sockfd, (const char *)SentMsg, strlen(SentMsg), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
             
         if (n = recvfrom(sockfd, (char *)RecvMsg, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
         {
-            RecvMsg[n] = '\0';
-            printf("%s\n", RecvMsg);
+            if (strcmp(SentMsg, RecvMsg) == 0)
+                AskAppendNewServer(ipList, 255, 16, &ipCount);
+            else
+                printf("%s\n", RecvMsg);
+            printf("[DEBUG] Received msg len: %d\n", strlen(RecvMsg));
         }
         else
         {
-            printf("Timeout reached! (server %s not available)\n", ipList[selIp]);
+            int counter = 1, foundValidServer = 0;
+            while (counter < ipCount && foundValidServer == 0)
+            {
+                printf("Timeout reached :: server (%s) not available, trying next server available (%s)\n", ipList[selIp], ipList[(selIp+1) % ipCount]);
+                counter += 1;
+                selIp = (selIp+1) % ipCount;
+                servaddr.sin_addr.s_addr = inet_addr(ipList[selIp]); // Try next available server
+                sendto(sockfd, (const char *)SentMsg, strlen(SentMsg), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+
+                if (n = recvfrom(sockfd, (char *)RecvMsg, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
+                {
+                    if (strcmp(SentMsg, RecvMsg) == 0)
+                        AskAppendNewServer(ipList, 255, 16, &ipCount);
+                    else
+                        printf("%s\n", RecvMsg);
+
+                    foundValidServer = 1;
+                }
+            }
         }
 
         memset(&SentMsg, 0, MAXLINE);   //We're preparing buffer for next request
