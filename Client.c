@@ -12,6 +12,11 @@
 #define PORT     8080
 #define MAXLINE 65527 // 65535 is MAX and other 8 bytes are reserved for header
 
+struct SPacket {
+    int len;
+    char msg[MAXLINE - sizeof(int)];
+};
+
 bool isValidIpAddress(char *ipAddress)
 {
     struct sockaddr_in sa;
@@ -48,7 +53,7 @@ bool ReadIPsList(char** iplist, int maxLines, int maxLen, int* ipCount)
             return false;
         }
 
-        *ipCount += 1;
+        (*ipCount) += 1;
     }
 
     if (*ipCount == 0)
@@ -63,7 +68,7 @@ bool ReadIPsList(char** iplist, int maxLines, int maxLen, int* ipCount)
     return true;
 }
 
-void AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
+bool AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
 {
     printf("Do you want to add a new server? (Y/N)\n");
     
@@ -74,7 +79,7 @@ void AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
         if (*ipCount >= maxLines)
         {
             printf("ERROR! Maximum number of IP addresses has been reached!\n");
-            return;
+            return false;
         }
 
         FILE *fp = fopen("Servers.txt", "a");
@@ -82,7 +87,7 @@ void AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
         if (fp == NULL)
         {
             printf("Can't open file Servers.txt!\n");
-            return;
+            return false;
         }
 
 
@@ -91,6 +96,7 @@ void AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
         do {
             printf("\nEnter IP address: ");
             scanf("%s", IP);
+
             if (isValidIpAddress(IP))
             {
                 is_ok = true;
@@ -105,7 +111,12 @@ void AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
         } while (is_ok != true);
 
         fclose(fp);
+        (*ipCount) += 1;
+
+        return true;
     }
+
+    return false;
 }
 
 int main()
@@ -144,9 +155,11 @@ int main()
 
     while(1)
     {
+        char c;
+        while((c= getchar()) != '\n' && c != EOF);  // Remove any unwanted character from stdin (scanf from AskAppendNewServer created this issue)
         printf("Enter filename:\t");
         fgets(SentMsg, MAXLINE, stdin);
-        SentMsg[strlen(SentMsg)-1]='\0';    //Remove newline
+        SentMsg[strcspn(SentMsg, "\n")] = '\0';    //Remove newline
         
         if (strlen(SentMsg) == 0)
             continue;
@@ -155,15 +168,23 @@ int main()
             
         if (n = recvfrom(sockfd, (char *)RecvMsg, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
         {
-            if (strcmp(SentMsg, RecvMsg) == 0)
-                AskAppendNewServer(ipList, 255, 16, &ipCount);
+            if (strcmp(SentMsg, RecvMsg) == 0) // Yep, this file does not exists on host.
+            {
+                if (AskAppendNewServer(ipList, 255, 16, &ipCount) == true)
+                {
+                    selIp = ipCount - 1; //We append always at the end of the array
+                    printf("Server (%s) has been added successfully. Now you can send your request from it.\n", ipList[selIp]);
+                    servaddr.sin_addr.s_addr = inet_addr(ipList[selIp]);
+                }
+            }
             else
                 printf("%s\n", RecvMsg);
-            printf("[DEBUG] Received msg len: %d\n", strlen(RecvMsg));
+            // printf("[DEBUG] Received msg len: %d\n", strlen(RecvMsg));
         }
         else
         {
             int counter = 1, foundValidServer = 0;
+
             while (counter < ipCount && foundValidServer == 0)
             {
                 printf("Timeout reached :: server (%s) not available, trying next server available (%s)\n", ipList[selIp], ipList[(selIp+1) % ipCount]);
