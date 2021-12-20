@@ -10,16 +10,17 @@
 #include <stdbool.h> //So retarded, need this for bool functions because we compile with C99 standard
    
 #define PORT     8080
-#define MAXLINE 65507 // The correct maximum UDP message size is 65507, as determined by the following formula:
+#define MAX_PACKET_SIZE 65507 // The correct maximum UDP message size is 65507, as determined by the following formula:
                       // 0xffff - (sizeof(IP Header) + sizeof(UDP Header)) = 65535-(20+8) = 65507
+#define MAX_BUFF_MSG (MAX_PACKET_SIZE - sizeof(int))
+#pragma pack(1) // To align struct correctly, without losing 3 bytes
+struct SPacket {
+    int len;
+    char msg[MAX_BUFF_MSG];
+};
 
 #define RED   "\x1B[31m"
 #define RESET "\x1B[0m"
-
-struct SPacket {
-    int len;
-    char msg[MAXLINE - sizeof(int)];
-};
 
 bool isValidIpAddress(char *ipAddress)
 {
@@ -126,8 +127,7 @@ bool AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
 int main()
 {
     int sockfd, ipCount = 0, selIp = 0;
-    char SentMsg[MAXLINE];
-    char RecvMsg[MAXLINE];
+    struct SPacket toSend, toRecv;
     struct sockaddr_in servaddr;
 
     char* ipList[255];
@@ -147,7 +147,7 @@ int main()
     servaddr.sin_port = htons(PORT);
     servaddr.sin_addr.s_addr = inet_addr(ipList[selIp]); //Trying 1st server then we move to a new one if this become unavailable
        
-    int n, len;
+    int len;
 
     //If we don't receive any answer in less than 1 second then is a problem..
     struct timeval tv;
@@ -162,17 +162,22 @@ int main()
         char c;
         while((c= getchar()) != '\n' && c != EOF);  // Remove any unwanted character from stdin (scanf from AskAppendNewServer created this issue)
         printf("Enter filename:\t");
-        fgets(SentMsg, MAXLINE, stdin);
-        SentMsg[strcspn(SentMsg, "\n")] = '\0';    //Remove newline
+        fgets(toSend.msg, MAX_BUFF_MSG, stdin);
+        toSend.msg[strcspn(toSend.msg, "\n")] = '\0';    //Remove newline
+        toSend.len = strlen(toSend.msg);
         
-        if (strlen(SentMsg) == 0)
+        if (toSend.len == 0)
             continue;
         
-        sendto(sockfd, (const char *)SentMsg, strlen(SentMsg), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-            
-        if (n = recvfrom(sockfd, (char *)RecvMsg, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
+        if (sendto(sockfd, &toSend, sizeof(toSend), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) <= 0)
         {
-            if (strcmp(SentMsg, RecvMsg) == 0) // Yep, this file does not exists on host.
+            perror (RED "Error! Cannot send message!\n" RESET);
+            break;
+	    }
+            
+        if (recvfrom(sockfd, &toRecv, sizeof(toRecv), MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
+        {
+            if (strcmp(toSend.msg, toRecv.msg) == 0) // Yep, this file does not exists on host.
             {
                 if (AskAppendNewServer(ipList, 255, 16, &ipCount) == true)
                 {
@@ -183,12 +188,16 @@ int main()
             }
             else
             {
-                printf("%s\n", RecvMsg);
+                if (toRecv.len == strlen(toRecv.msg))
+                {
+                    printf("%s\n", toRecv.msg);
 
-                if (strlen(RecvMsg) == MAXLINE)
-                    printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
+                    if (toRecv.len == MAX_BUFF_MSG)
+                        printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
+                }
+                else
+                        printf("ERROR! Transmission eror (expected %d bytes and received %d.\n", toRecv.len, sizeof(toRecv.msg));
             }
-            // printf("[DEBUG] Received msg len: %d\n", strlen(RecvMsg));
         }
         else
         {
@@ -200,18 +209,28 @@ int main()
                 counter += 1;
                 selIp = (selIp+1) % ipCount;
                 servaddr.sin_addr.s_addr = inet_addr(ipList[selIp]); // Try next available server
-                sendto(sockfd, (const char *)SentMsg, strlen(SentMsg), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-
-                if (n = recvfrom(sockfd, (char *)RecvMsg, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
+                
+                if(sendto(sockfd, &toSend, sizeof(toSend), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) <= 0)
                 {
-                    if (strcmp(SentMsg, RecvMsg) == 0)
+                    perror (RED "Error! Cannot send message!\n" RESET);
+                    break;
+                }
+
+                if (recvfrom(sockfd, &toRecv, sizeof(toRecv), MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
+                {
+                    if (strcmp(toSend.msg, toRecv.msg) == 0)
                         AskAppendNewServer(ipList, 255, 16, &ipCount);
                     else
                     {
-                        printf("%s\n", RecvMsg);
+                        if (toRecv.len == strlen(toRecv.msg))
+                        {
+                            printf("%s\n", toRecv.msg);
 
-                        if (strlen(RecvMsg) == MAXLINE)
-                            printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
+                            if (toRecv.len == MAX_BUFF_MSG)
+                                printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
+                        }
+                        else
+                            printf("ERROR! Transmission eror (expected %d bytes and received %d.\n", toRecv.len, sizeof(toRecv.msg));
                     }
 
                     foundValidServer = 1;
@@ -224,8 +243,8 @@ int main()
             }
         }
 
-        memset(&SentMsg, 0, MAXLINE);   //We're preparing buffer for next request
-        memset(&RecvMsg, 0, MAXLINE);   //We're preparing buffer for next request
+        memset(&toSend, 0, MAX_PACKET_SIZE);   //We're preparing buffer for next request
+        memset(&toRecv, 0, MAX_PACKET_SIZE);   //We're preparing buffer for next request
     }
 
     for (int i = 0; i < ipCount; ++i)

@@ -12,58 +12,66 @@
 #include <dirent.h>     //User to list directory's content
    
 #define PORT     8080
-#define MAXLINE 65507 // The correct maximum UDP message size is 65507, as determined by the following formula:
+#define MAX_PACKET_SIZE 65507 // The correct maximum UDP message size is 65507, as determined by the following formula:
                       // 0xffff - (sizeof(IP Header) + sizeof(UDP Header)) = 65535-(20+8) = 65507
+#define MAX_BUFF_MSG (MAX_PACKET_SIZE - sizeof(int))
+#pragma pack(1) // To align struct correctly, without losing 3 bytes
 
-void GetFileMetadata(const char* szPath, char* Out)
+struct SPacket {
+    int len;
+    char msg[MAX_BUFF_MSG];
+};
+
+void GetFileMetadata(const char* szPath, struct SPacket *Out)
 {
     if (access(szPath, F_OK) != 0 )
-        snprintf(Out, MAXLINE, "%s", szPath);
+        snprintf(Out->msg, MAX_BUFF_MSG, "%s", szPath);
     else
     {
         struct stat res;
         stat(szPath, &res);
 
         int length = 0;
-        length += snprintf(Out+length, MAXLINE, "Filename:\t\t%s\n", szPath);
-        length += snprintf(Out+length, MAXLINE, "Filesize:\t\t%d\n", res.st_size);
-        length += snprintf(Out+length, MAXLINE, "Permissions:\t\t");
-        length += snprintf(Out+length, MAXLINE, (S_ISDIR(res.st_mode)) ? "d" : "-");
-        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IRUSR) ? "r" : "-");
-        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IWUSR) ? "w" : "-");
-        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IXUSR) ? "x" : "-");
-        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IRGRP) ? "r" : "-");
-        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IWGRP) ? "w" : "-");
-        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IXGRP) ? "x" : "-");
-        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IROTH) ? "r" : "-");
-        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IWOTH) ? "w" : "-");
-        length += snprintf(Out+length, MAXLINE, (res.st_mode & S_IXOTH) ? "x\n" : "-\n");
-        length += snprintf(Out+length, MAXLINE, "Owner:\t\t\t%d\n", res.st_gid);
-        length += snprintf(Out+length, MAXLINE, "Last status change:\t%s", ctime(&res.st_ctime));
-        length += snprintf(Out+length, MAXLINE, "Last file access:\t%s", ctime(&res.st_atime));
-        length += snprintf(Out+length, MAXLINE, "Last file modification:\t%s", ctime(&res.st_mtime));
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, "Filename:\t\t%s\n", szPath);
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, "Filesize:\t\t%d\n", res.st_size);
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, "Permissions:\t\t");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (S_ISDIR(res.st_mode)) ? "d" : "-");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (res.st_mode & S_IRUSR) ? "r" : "-");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (res.st_mode & S_IWUSR) ? "w" : "-");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (res.st_mode & S_IXUSR) ? "x" : "-");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (res.st_mode & S_IRGRP) ? "r" : "-");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (res.st_mode & S_IWGRP) ? "w" : "-");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (res.st_mode & S_IXGRP) ? "x" : "-");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (res.st_mode & S_IROTH) ? "r" : "-");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (res.st_mode & S_IWOTH) ? "w" : "-");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, (res.st_mode & S_IXOTH) ? "x\n" : "-\n");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, "Owner:\t\t\t%d\n", res.st_gid);
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, "Last status change:\t%s", ctime(&res.st_ctime));
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, "Last file access:\t%s", ctime(&res.st_atime));
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, "Last file modification:\t%s", ctime(&res.st_mtime));
 
         DIR *d;
         struct dirent *dir;
         d = opendir(szPath);
         if (d != NULL)
         {
-            length += snprintf(Out+length, MAXLINE, "Content of %s:\t", szPath);
+            length += snprintf(Out->msg+length, MAX_BUFF_MSG, "Content of %s:\t", szPath);
             while ((dir = readdir(d)) != NULL)
             {
-                length += snprintf(Out+length, MAXLINE, "%s\t", dir->d_name);
+                length += snprintf(Out->msg+length, MAX_BUFF_MSG, "%s\t", dir->d_name);
             }
 
             closedir(d);
         }
-        length += snprintf(Out+length, MAXLINE, "\n");
+        length += snprintf(Out->msg+length, MAX_BUFF_MSG, "\n");
+        Out->len = length;
     }
 }
 
 int main()
 {
     int sockfd;
-    char InMsg[MAXLINE], OutMsg[MAXLINE];
+    struct SPacket toSend, toRecv;
 
     struct sockaddr_in servaddr, cliaddr;
        
@@ -89,26 +97,33 @@ int main()
         exit(EXIT_FAILURE);
     }
 
-    int len, n;
+    int len;
    
     len = sizeof(cliaddr);  //len is value/resuslt
 
     while(1)
     {
-        n = recvfrom(sockfd, (char *)InMsg, MAXLINE, MSG_WAITALL, (struct sockaddr *) &cliaddr, &len);
-        InMsg[n] = '\0';
-        // printf("[DEBUG] Client request: %s\n", InMsg);
-        GetFileMetadata(InMsg, OutMsg);
-        // printf("[DEBUG] Server answer: %s (len = %d)\n", OutMsg, strlen(OutMsg));
+        if (recvfrom(sockfd, &toRecv, sizeof(toRecv), MSG_WAITALL, (struct sockaddr *) &servaddr, &len) <= 0)
+        {
+            perror ("Error! Cannot read message!\n");
+            break;
+	    }
 
-        for (int i = 0; i < MAXLINE - 1; ++i)
-            OutMsg[i] = 'a';
-        OutMsg[MAXLINE - 1] = '\n';
+        toRecv.msg[toRecv.len] = '\0';
+        printf("[DEBUG] Client request: %s\n", toRecv.msg);
+        GetFileMetadata(toRecv.msg, &toSend);
+        printf("[DEBUG] Server answer: %s (len = %d)\n", toSend.msg, toSend.len);
 
-        sendto(sockfd, (const char *)OutMsg, strlen(OutMsg),  MSG_CONFIRM, (const struct sockaddr *) &cliaddr, len);
+        toSend.msg[toSend.len - 1] = '\n';
 
-        memset(&InMsg, 0, MAXLINE);      //We're preparing buffer for next request
-        memset(&OutMsg, 0, MAXLINE);     //We're preparing buffer for next request
+        if (sendto(sockfd, &toSend, sizeof(toSend), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) <= 0)
+        {
+            perror ("Error! Cannot send message!\n");
+            break;
+	    }
+
+        memset(&toSend, 0, MAX_PACKET_SIZE);      //We're preparing buffer for next request
+        memset(&toRecv, 0, MAX_PACKET_SIZE);     //We're preparing buffer for next request
     }
        
     return 0;

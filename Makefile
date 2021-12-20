@@ -4,4 +4,4 @@ all:
 	gcc Server.c -o Server
 	gcc Client.c -o Client
 clean:
-	rm -f *~Client Server
+	rm -f Client Server
