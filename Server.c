@@ -12,7 +12,8 @@
 #include <dirent.h>     //User to list directory's content
    
 #define PORT     8080
-#define MAXLINE 65527 // 65535 is MAX and other 8 bytes are reserved for header
+#define MAXLINE 65507 // The correct maximum UDP message size is 65507, as determined by the following formula:
+                      // 0xffff - (sizeof(IP Header) + sizeof(UDP Header)) = 65535-(20+8) = 65507
 
 void GetFileMetadata(const char* szPath, char* Out)
 {
@@ -99,6 +100,11 @@ int main()
         // printf("[DEBUG] Client request: %s\n", InMsg);
         GetFileMetadata(InMsg, OutMsg);
         // printf("[DEBUG] Server answer: %s (len = %d)\n", OutMsg, strlen(OutMsg));
+
+        for (int i = 0; i < MAXLINE - 1; ++i)
+            OutMsg[i] = 'a';
+        OutMsg[MAXLINE - 1] = '\n';
+
         sendto(sockfd, (const char *)OutMsg, strlen(OutMsg),  MSG_CONFIRM, (const struct sockaddr *) &cliaddr, len);
 
         memset(&InMsg, 0, MAXLINE);      //We're preparing buffer for next request

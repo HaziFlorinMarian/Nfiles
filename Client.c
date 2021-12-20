@@ -10,7 +10,11 @@
 #include <stdbool.h> //So retarded, need this for bool functions because we compile with C99 standard
    
 #define PORT     8080
-#define MAXLINE 65527 // 65535 is MAX and other 8 bytes are reserved for header
+#define MAXLINE 65507 // The correct maximum UDP message size is 65507, as determined by the following formula:
+                      // 0xffff - (sizeof(IP Header) + sizeof(UDP Header)) = 65535-(20+8) = 65507
+
+#define RED   "\x1B[31m"
+#define RESET "\x1B[0m"
 
 struct SPacket {
     int len;
@@ -78,7 +82,7 @@ bool AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
     {
         if (*ipCount >= maxLines)
         {
-            printf("ERROR! Maximum number of IP addresses has been reached!\n");
+            printf(RED "ERROR! Maximum number of IP addresses has been reached!\n" RESET);
             return false;
         }
 
@@ -86,7 +90,7 @@ bool AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
 
         if (fp == NULL)
         {
-            printf("Can't open file Servers.txt!\n");
+            printf(RED "Can't open file Servers.txt!\n" RESET);
             return false;
         }
 
@@ -107,7 +111,7 @@ bool AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
                 printf("\"%s\" added to IP list\n", iplist[*ipCount]);
             }
             else
-                printf("ERROR! %s is not a valid IP address!", IP);
+                printf(RED "ERROR! %s is not a valid IP address!" RESET, IP);
         } while (is_ok != true);
 
         fclose(fp);
@@ -178,7 +182,12 @@ int main()
                 }
             }
             else
+            {
                 printf("%s\n", RecvMsg);
+
+                if (strlen(RecvMsg) == MAXLINE)
+                    printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
+            }
             // printf("[DEBUG] Received msg len: %d\n", strlen(RecvMsg));
         }
         else
@@ -187,7 +196,7 @@ int main()
 
             while (counter < ipCount && foundValidServer == 0)
             {
-                printf("Timeout reached :: server (%s) not available, trying next server available (%s)\n", ipList[selIp], ipList[(selIp+1) % ipCount]);
+                printf(RED "Timeout reached :: server (%s) not available, trying next server available (%s)\n" RESET, ipList[selIp], ipList[(selIp+1) % ipCount]);
                 counter += 1;
                 selIp = (selIp+1) % ipCount;
                 servaddr.sin_addr.s_addr = inet_addr(ipList[selIp]); // Try next available server
@@ -198,10 +207,20 @@ int main()
                     if (strcmp(SentMsg, RecvMsg) == 0)
                         AskAppendNewServer(ipList, 255, 16, &ipCount);
                     else
+                    {
                         printf("%s\n", RecvMsg);
+
+                        if (strlen(RecvMsg) == MAXLINE)
+                            printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
+                    }
 
                     foundValidServer = 1;
                 }
+            }
+            if (foundValidServer == false)
+            {
+                printf(RED "All servers are unavailable. Please try again later.\n" RESET);
+                break;
             }
         }
 
@@ -209,7 +228,8 @@ int main()
         memset(&RecvMsg, 0, MAXLINE);   //We're preparing buffer for next request
     }
 
-    free(ipList); //No memory leaks, please.
+    for (int i = 0; i < ipCount; ++i)
+        free(ipList[i]); //No memory leaks, please.
     close(sockfd);
     return 0;
 }
