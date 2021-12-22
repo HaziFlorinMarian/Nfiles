@@ -77,7 +77,9 @@ bool AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
 {
     printf("Do you want to add a new server? (Y/N)\n");
     
-    char ans = getchar();
+    char c, ans = getchar();
+
+    while((c= getchar()) != '\n' && c != EOF) {}  // Remove any unwanted character from stdin
 
     if (ans == 'y' || ans == 'Y')
     {
@@ -117,6 +119,8 @@ bool AskAppendNewServer(char** iplist, int maxLines, int maxLen, int* ipCount)
 
         fclose(fp);
         (*ipCount) += 1;
+        
+        while((c= getchar()) != '\n' && c != EOF) {}  // Remove any unwanted character from stdin
 
         return true;
     }
@@ -159,8 +163,6 @@ int main()
 
     while(1)
     {
-        char c;
-        while((c= getchar()) != '\n' && c != EOF);  // Remove any unwanted character from stdin (scanf from AskAppendNewServer created this issue)
         printf("Enter filename:\t");
         fgets(toSend.msg, MAX_BUFF_MSG, stdin);
         toSend.msg[strcspn(toSend.msg, "\n")] = '\0';    //Remove newline
@@ -168,79 +170,49 @@ int main()
         
         if (toSend.len == 0)
             continue;
-        
-        if (sendto(sockfd, &toSend, sizeof(toSend), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) <= 0)
+
+        int counter = 1, foundValidServer = 0;
+
+        while (counter <= ipCount && foundValidServer == 0)
         {
-            perror (RED "Error! Cannot send message!\n" RESET);
-            break;
-	    }
-            
-        if (recvfrom(sockfd, &toRecv, sizeof(toRecv), MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
-        {
-            if (strcmp(toSend.msg, toRecv.msg) == 0) // Yep, this file does not exists on host.
+            if(sendto(sockfd, &toSend, sizeof(toSend), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) <= 0)
             {
-                if (AskAppendNewServer(ipList, 255, 16, &ipCount) == true)
+                perror (RED "Error! Cannot send message!\n" RESET);
+                break;
+            }
+
+            if (recvfrom(sockfd, &toRecv, sizeof(toRecv), MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
+            {
+                if (strcmp(toSend.msg, toRecv.msg) == 0)
+                    AskAppendNewServer(ipList, 255, 16, &ipCount);
+                else
                 {
-                    selIp = ipCount - 1; //We append always at the end of the array
-                    printf("Server (%s) has been added successfully. Now you can send your request from it.\n", ipList[selIp]);
-                    servaddr.sin_addr.s_addr = inet_addr(ipList[selIp]);
-                }
+                    if (toRecv.len == strlen(toRecv.msg))
+                    {
+                        printf("%s\n", toRecv.msg);
+
+                        if (toRecv.len == MAX_BUFF_MSG)
+                            printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
+                    }
+                    else
+                        printf("ERROR! Transmission eror (expected %d bytes and received %d.\n", toRecv.len, sizeof(toRecv.msg));
+                    }
+
+                    foundValidServer = 1;
             }
             else
-            {
-                if (toRecv.len == strlen(toRecv.msg))
-                {
-                    printf("%s\n", toRecv.msg);
-
-                    if (toRecv.len == MAX_BUFF_MSG)
-                        printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
-                }
-                else
-                        printf("ERROR! Transmission eror (expected %d bytes and received %d.\n", toRecv.len, sizeof(toRecv.msg));
-            }
-        }
-        else
-        {
-            int counter = 1, foundValidServer = 0;
-
-            while (counter < ipCount && foundValidServer == 0)
             {
                 printf(RED "Timeout reached :: server (%s) not available, trying next server available (%s)\n" RESET, ipList[selIp], ipList[(selIp+1) % ipCount]);
                 counter += 1;
                 selIp = (selIp+1) % ipCount;
                 servaddr.sin_addr.s_addr = inet_addr(ipList[selIp]); // Try next available server
-                
-                if(sendto(sockfd, &toSend, sizeof(toSend), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) <= 0)
-                {
-                    perror (RED "Error! Cannot send message!\n" RESET);
-                    break;
-                }
-
-                if (recvfrom(sockfd, &toRecv, sizeof(toRecv), MSG_WAITALL, (struct sockaddr *) &servaddr, &len) > 0)
-                {
-                    if (strcmp(toSend.msg, toRecv.msg) == 0)
-                        AskAppendNewServer(ipList, 255, 16, &ipCount);
-                    else
-                    {
-                        if (toRecv.len == strlen(toRecv.msg))
-                        {
-                            printf("%s\n", toRecv.msg);
-
-                            if (toRecv.len == MAX_BUFF_MSG)
-                                printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
-                        }
-                        else
-                            printf("ERROR! Transmission eror (expected %d bytes and received %d.\n", toRecv.len, sizeof(toRecv.msg));
-                    }
-
-                    foundValidServer = 1;
-                }
             }
-            if (foundValidServer == false)
-            {
-                printf(RED "All servers are unavailable. Please try again later.\n" RESET);
-                break;
-            }
+        }
+            
+        if (foundValidServer == false)
+        {
+            printf(RED "All servers are unavailable. Please try again later.\n" RESET);
+            break;
         }
 
         memset(&toSend, 0, MAX_PACKET_SIZE);   //We're preparing buffer for next request
