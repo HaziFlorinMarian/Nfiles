@@ -171,6 +171,9 @@ int main()
         if (toSend.len == 0)
             continue;
 
+        if (strcmp(toSend.msg, "--exit") == 0)  // We're done
+            break;
+
         int counter = 1, foundValidServer = 0;
 
         while (counter <= ipCount && foundValidServer == 0)
@@ -195,7 +198,7 @@ int main()
                             printf(RED "WARNING! THIS PACKET HAS REACHED MAXIMUM ALLOWED SIZE! IT MAY BE INCOMPLETE!!!\n\n" RESET);
                     }
                     else
-                        printf("ERROR! Transmission eror (expected %d bytes and received %d.\n", toRecv.len, sizeof(toRecv.msg));
+                        printf("ERROR! Transmission eror (expected %d bytes and received %d.\n", toRecv.len, strlen(toRecv.msg));
                     }
 
                     foundValidServer = 1;

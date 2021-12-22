@@ -9,7 +9,9 @@
 #include <netinet/in.h>
 #include <sys/stat.h>   //Used to get file metadata
 #include <time.h>       //Used to format time-based metadata
-#include <dirent.h>     //User to list directory's content
+#include <dirent.h>     //Used to list directory's content
+#include <sys/wait.h>   //Used to wait for childrens to die before closing main process
+
    
 #define PORT     8080
 #define MAX_PACKET_SIZE 65507 // The correct maximum UDP message size is 65507, as determined by the following formula:
@@ -70,7 +72,7 @@ void GetFileMetadata(const char* szPath, struct SPacket *Out)
 
 int main()
 {
-    int sockfd;
+    int sockfd, child;
     struct SPacket toSend, toRecv;
 
     struct sockaddr_in servaddr, cliaddr;
@@ -109,18 +111,47 @@ int main()
             break;
 	    }
 
-        toRecv.msg[toRecv.len] = '\0';
-        printf("[DEBUG] Client request: %s\n", toRecv.msg);
-        GetFileMetadata(toRecv.msg, &toSend);
-        printf("[DEBUG] Server answer: %s (len = %d)\n", toSend.msg, toSend.len);
-
-        toSend.msg[toSend.len - 1] = '\n';
-
-        if (sendto(sockfd, &toSend, sizeof(toSend), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) <= 0)
+        if (child = fork() == 0)
         {
-            perror ("Error! Cannot send message!\n");
-            break;
-	    }
+            toRecv.msg[toRecv.len] = '\0';
+
+            if (toRecv.len == strlen(toRecv.msg))
+            {
+                //printf("[DEBUG] Client request: %s\n", toRecv.msg);
+                GetFileMetadata(toRecv.msg, &toSend);
+                //printf("[DEBUG] Server answer: %s (len = %d)\n", toSend.msg, toSend.len);
+            }
+            else
+            {
+                snprintf(toSend.msg, MAX_BUFF_MSG, "ERROR! Transmission eror (expected %d bytes and received %d.\n", toRecv.len, strlen(toRecv.msg));
+                toSend.len = strlen(toSend.msg);
+            }
+            
+            toSend.msg[toSend.len - 1] = '\n';
+
+            if (sendto(sockfd, &toSend, sizeof(toSend), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) <= 0)
+            {
+                perror ("Error! Cannot send message!\n");
+                break;
+            }
+
+            //printf("[DEBUG] I'm %d, son of %d\n", getpid(), getppid());
+
+            return 0;
+        }
+        else if (child == -1)
+        {
+            strcpy(toSend.msg, "Internal error! Please try again!");
+            toSend.len = strlen(toSend.msg);
+
+            if (sendto(sockfd, &toSend, sizeof(toSend), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) <= 0)
+            {
+                perror ("Error! Cannot send message!\n");
+                break;
+            }
+        }
+
+        wait(NULL); // We're waiting for childrens to die before closing main process
 
         memset(&toSend, 0, MAX_PACKET_SIZE);      //We're preparing buffer for next request
         memset(&toRecv, 0, MAX_PACKET_SIZE);     //We're preparing buffer for next request
